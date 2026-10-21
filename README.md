@@ -8,7 +8,7 @@
 - תרחישים: היכרות, בית קפה, שוק, משפחה, מונית ועוד. סיכום טעויות ומילים בסוף כל שיחה.
 
 ## הפעלה
-האתר: https://itamsh.github.io/arabic-practice/
+האתר: https://arabic-practice-virid.vercel.app/
 בפעם הראשונה מדביקים מפתח Gemini חינמי (https://aistudio.google.com/apikey). המפתח נשמר רק בדפדפן.
 בטלפון: "הוסף למסך הבית" כדי לפתוח כמו אפליקציה.
 
