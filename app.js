@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.1.1';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 // Preferred models, best first. The first one this key can use is picked automatically.
@@ -128,11 +128,28 @@ async function askJSON(parts, schema) {
 // ---------- speech output ----------
 const audioCache = new Map(); // key -> AudioBuffer
 let currentSource = null;
+let currentBtn = null;
+let playToken = 0; // bumped on every stop, so a TTS fetch that finishes late doesn't start playing
+
+function markBtn(btn, on) {
+  if (!btn) return;
+  if (on) {
+    if (!btn.dataset.icon) btn.dataset.icon = btn.textContent;
+    if (btn.classList.contains('icon-btn')) btn.textContent = '⏹';
+    btn.classList.add('playing');
+  } else {
+    if (btn.dataset.icon && btn.classList.contains('icon-btn')) btn.textContent = btn.dataset.icon;
+    btn.classList.remove('loading', 'playing');
+  }
+}
 
 function stopPlayback() {
+  playToken++;
   try { currentSource?.stop(); } catch {}
   currentSource = null;
-  speechSynthesis?.cancel?.();
+  window.speechSynthesis?.cancel();
+  markBtn(currentBtn, false);
+  currentBtn = null;
 }
 
 function pcmToBuffer(b64, rate) {
@@ -152,11 +169,11 @@ function pcmToBuffer(b64, rate) {
 async function ttsBuffer(arabic, slow) {
   const cacheKey = `${state.settings.voice}|${slow}|${arabic}`;
   if (audioCache.has(cacheKey)) return audioCache.get(cacheKey);
-  const style = slow
-    ? 'Speak slowly and very clearly, with small pauses between words, like talking to a beginner learner'
-    : 'Speak at a relaxed, natural pace, clearly';
+  // Send ONLY the Arabic text: the TTS model reads any instruction text aloud.
+  // Slow mode = an Arabic comma between words, which makes the voice pause after each word.
+  const text = slow ? arabic.trim().split(/\s+/).join('، ') : arabic;
   const body = {
-    contents: [{ parts: [{ text: `${style}, in a native Palestinian Jerusalem colloquial Arabic accent (not Modern Standard Arabic). Say exactly:\n${arabic}` }] }],
+    contents: [{ parts: [{ text }] }],
     generationConfig: {
       responseModalities: ['AUDIO'],
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICES[state.settings.voice] } } },
@@ -186,27 +203,39 @@ function speakWithBrowser(arabic, slow) {
 }
 
 async function speak(arabic, slow = state.settings.speed === 'slow', btn) {
-  if (!arabic) return;
+  // Tapping the button that is currently playing/loading = stop.
+  if (btn && btn === currentBtn) { stopPlayback(); return; }
   stopPlayback();
+  if (!arabic) return;
+  const token = playToken;
+  currentBtn = btn || null;
+  markBtn(btn, true);
   btn?.classList.add('loading');
   try {
-    if (!state.models?.tts) throw new Error('no tts model');
-    const buf = await ttsBuffer(arabic, slow);
-    const c = audioCtx();
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    src.connect(c.destination);
-    currentSource = src;
+    let buf = null;
+    try {
+      if (state.models?.tts) buf = await ttsBuffer(arabic, slow);
+    } catch (e) {
+      console.warn('Gemini TTS failed, using browser voice', e);
+    }
+    if (token !== playToken) return; // stopped while loading
     btn?.classList.remove('loading');
-    btn?.classList.add('playing');
-    await new Promise((res) => { src.onended = res; src.start(); });
-  } catch (e) {
-    console.warn('Gemini TTS failed, using browser voice', e);
-    btn?.classList.remove('loading');
-    btn?.classList.add('playing');
-    await speakWithBrowser(arabic, slow);
+    if (buf) {
+      const c = audioCtx();
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      currentSource = src;
+      await new Promise((res) => { src.onended = res; src.start(); });
+    } else {
+      await speakWithBrowser(arabic, slow);
+    }
   } finally {
-    btn?.classList.remove('loading', 'playing');
+    if (token === playToken) {
+      markBtn(btn, false);
+      currentBtn = null;
+      currentSource = null;
+    }
   }
 }
 

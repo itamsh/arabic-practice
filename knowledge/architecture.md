@@ -4,7 +4,7 @@
 1. Tap mic → `getUserMedia` → ScriptProcessor collects Float32 PCM (works on Chrome/Safari/Firefox; MediaRecorder formats differ per browser, so we avoid it).
 2. Tap again → downsample to 16 kHz mono WAV → base64 → `generateContent` with text prompt (scenario + history) + `inlineData audio/wav`.
 3. Response is JSON (`responseSchema` = `TURN_SCHEMA` in prompts.js): what was heard (translit), correction, reply (Arabic w/ tashkeel + translit + Hebrew), hint.
-4. Reply Arabic → TTS model (`responseModalities: AUDIO`) → raw PCM L16 24 kHz → AudioBuffer → played on the single shared AudioContext.
+4. Reply Arabic (text ONLY — the TTS model reads instructions aloud) → TTS model (`responseModalities: AUDIO`) → raw PCM L16 24 kHz → AudioBuffer → played on the single shared AudioContext.
    Fallback: browser `speechSynthesis` Arabic voice (MSA-ish, worse).
 
 ## Gemini
