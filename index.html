@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>שותף לערבית</title>
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>שותף לערבית <span class="sub">מדברים פלסטינית</span></h1>
+    <button id="open-settings" class="icon-btn" title="הגדרות">⚙️</button>
+  </header>
+
+  <main>
+    <!-- Home: pick a scenario -->
+    <section id="home" class="screen" hidden>
+      <p class="intro">על מה נדבר היום?</p>
+      <div id="scenarios" class="scenarios"></div>
+      <details class="help">
+        <summary>איך זה עובד?</summary>
+        <ul>
+          <li>בוחרים נושא. השותף פותח בשאלה ואומר אותה בקול.</li>
+          <li>לוחצים על המיקרופון, עונים בערבית ולוחצים שוב בסוף המשפט.</li>
+          <li>רואים בתעתיק עברי מה נשמע, מקבלים תיקון אם צריך, והשיחה ממשיכה.</li>
+          <li>תקועים? כפתור <b>רמז</b> מציע תשובה. אפשר גם לשאול בעברית: "איך אומרים…?"</li>
+          <li>בסוף לוחצים <b>סיום</b> ומקבלים סיכום טעויות ומילים.</li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- Chat -->
+    <section id="chat" class="screen" hidden>
+      <div class="chat-head">
+        <button id="back-btn" class="text-btn">→ נושאים</button>
+        <span id="chat-title"></span>
+        <button id="finish-btn" class="text-btn strong">סיום וסיכום</button>
+      </div>
+      <div id="chat-log" class="chat-log"></div>
+      <div class="controls">
+        <div id="hint-box" class="hint-box" hidden></div>
+        <div id="status" class="status"></div>
+        <div class="control-row">
+          <button id="hint-btn" class="side-btn" disabled>💡<span>רמז</span></button>
+          <button id="mic" class="mic" aria-label="הקלטה">🎤</button>
+          <span class="side-spacer"></span>
+        </div>
+        <div id="mic-label" class="mic-label">לחץ ודבר</div>
+      </div>
+    </section>
+
+    <!-- Summary -->
+    <section id="summary" class="screen" hidden>
+      <h2>סיכום השיחה</h2>
+      <div id="summary-body"></div>
+      <button id="summary-home" class="primary">לשיחה חדשה</button>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings" class="screen" hidden>
+      <h2>הגדרות</h2>
+      <form id="settings-form">
+        <label class="field">
+          <span>מפתח Gemini</span>
+          <input name="key" type="password" autocomplete="off" placeholder="מדביקים כאן את המפתח" dir="ltr">
+          <small>המפתח נשמר רק בדפדפן הזה. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">להוצאת מפתח חינמי</a></small>
+        </label>
+        <label class="field"><span>קול השותף</span>
+          <select name="voice"><option value="male">גבר (סמיר)</option><option value="female">אישה (סמאח)</option></select>
+        </label>
+        <label class="field"><span>מהירות דיבור</span>
+          <select name="speed"><option value="slow">איטית וברורה</option><option value="normal">רגילה</option></select>
+        </label>
+        <label class="field"><span>תיקונים</span>
+          <select name="correct"><option value="each">אחרי כל משפט</option><option value="end">רק בסיכום בסוף</option></select>
+        </label>
+        <label class="check"><input type="checkbox" name="showTranslit"> להציג מיד את התעתיק של מה שהשותף אומר</label>
+        <label class="check"><input type="checkbox" name="showTranslation"> להציג מיד את התרגום לעברית</label>
+        <button id="save-btn" class="primary" type="submit">שמור</button>
+        <button id="close-settings" class="text-btn" type="button">ביטול</button>
+        <p id="model-info" class="muted"></p>
+      </form>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <footer id="version" class="version"></footer>
+
+  <script src="prompts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
