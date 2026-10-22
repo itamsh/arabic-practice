@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.2';
+const APP_VERSION = '0.1.3';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 // Preferred models, best first. When one is busy the next is tried automatically.
@@ -198,15 +198,52 @@ function stopPlayback() {
 function pcmToBuffer(b64, rate) {
   const bin = atob(b64);
   const n = bin.length >> 1;
-  const c = audioCtx();
-  const buf = c.createBuffer(1, n, rate);
-  const ch = buf.getChannelData(0);
+  const pcm = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
     if (v >= 0x8000) v -= 0x10000;
-    ch[i] = v / 0x8000;
+    pcm[i] = v / 0x8000;
   }
+  const len = speechEnd(pcm, rate);
+  const c = audioCtx();
+  const buf = c.createBuffer(1, Math.max(1, len), rate);
+  const ch = buf.getChannelData(0);
+  ch.set(pcm.subarray(0, len));
+  // short fade-in / fade-out so the sound never starts or stops with a click
+  const fadeIn = Math.min(len, Math.round(rate * 0.01)), fadeOut = Math.min(len, Math.round(rate * 0.08));
+  for (let i = 0; i < fadeIn; i++) ch[i] *= i / fadeIn;
+  for (let i = 0; i < fadeOut; i++) ch[len - 1 - i] *= i / fadeOut;
   return buf;
+}
+
+// The TTS audio often ends with ~0.5 s of static/noise burst. Walk back from the end in 20 ms
+// windows and drop windows that are silence or noise (very high zero-crossing rate), up to 1.2 s.
+function speechEnd(pcm, rate) {
+  const win = Math.round(rate * 0.02);
+  const windows = Math.floor(pcm.length / win);
+  if (windows < 10) return pcm.length;
+  const rms = new Float32Array(windows), zcr = new Float32Array(windows);
+  let peak = 0;
+  for (let w = 0; w < windows; w++) {
+    let sum = 0, cross = 0;
+    for (let i = w * win; i < (w + 1) * win; i++) {
+      sum += pcm[i] * pcm[i];
+      if (i > w * win && (pcm[i] >= 0) !== (pcm[i - 1] >= 0)) cross++;
+    }
+    rms[w] = Math.sqrt(sum / win);
+    zcr[w] = cross / win;
+    if (rms[w] > peak) peak = rms[w];
+  }
+  const maxTrim = Math.round(1.2 / 0.02);
+  let w = windows - 1;
+  while (w > windows - 1 - maxTrim && w > 0) {
+    const silent = rms[w] < peak * 0.04;
+    const noisy = zcr[w] > 0.3;
+    if (!silent && !noisy) break;
+    w--;
+  }
+  // keep ~60 ms after the last speech window so word endings aren't cut
+  return Math.min(pcm.length, (w + 1) * win + Math.round(rate * 0.06));
 }
 
 async function ttsBuffer(arabic, slow) {
