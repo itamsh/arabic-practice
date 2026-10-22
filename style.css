@@ -161,3 +161,4 @@ main { max-width: 680px; margin: 0 auto; padding: 16px; }
 @keyframes pulse { 50% { opacity: .35; } }
 @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(194,65,12,.5); } 100% { box-shadow: 0 0 0 22px rgba(194,65,12,0); } }
 @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+.bubble.retry { align-self: center; text-align: center; background: var(--warn); border-color: var(--warn-border); }

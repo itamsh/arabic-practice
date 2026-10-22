@@ -16,3 +16,4 @@
 ## Gotchas
 - iPhone: AudioContext must be created/resumed inside a tap (done in `startScenario` and mic tap). TTS plays through that context so it isn't blocked after the async fetch.
 - History is sent as text each turn (single-turn request), not multi-turn `contents` — simpler, and the model sees Arabic + Hebrew of each line.
+- Free tier is often overloaded (503 'high demand'); `withFallback` in app.js rotates models. If it keeps failing, consider enabling billing on the key (paid tier gets priority) or reordering TEXT_MODELS.

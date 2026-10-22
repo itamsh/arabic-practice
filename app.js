@@ -1,8 +1,8 @@
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.1.2';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
-// Preferred models, best first. The first one this key can use is picked automatically.
-const TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+// Preferred models, best first. When one is busy the next is tried automatically.
+const TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const TTS_MODELS  = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
 const VOICES = { male: 'Charon', female: 'Kore' };
 const MAX_REC_SECONDS = 30;
@@ -82,14 +82,56 @@ async function pickModels() {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error?.message || `HTTP ${r.status}`);
   const names = new Set((j.models || []).map((m) => m.name.replace(/^models\//, '')));
-  const text = TEXT_MODELS.find((m) => names.has(m))
-    || [...names].find((n) => /^gemini-.*flash$/.test(n))
-    || TEXT_MODELS[0];
-  const tts = TTS_MODELS.find((m) => names.has(m))
-    || [...names].find((n) => /tts/.test(n))
-    || null;
-  state.models = { text, tts };
+  const textList = TEXT_MODELS.filter((m) => names.has(m));
+  if (!textList.length) textList.push([...names].find((n) => /^gemini-.*flash$/.test(n)) || TEXT_MODELS[0]);
+  const ttsList = TTS_MODELS.filter((m) => names.has(m));
+  if (!ttsList.length) { const t = [...names].find((n) => /tts/.test(n)); if (t) ttsList.push(t); }
+  state.models = { text: textList[0], tts: ttsList[0] || null, textList, ttsList };
   store.set('ap_models', state.models);
+}
+
+// Models to try, in order. The model that last worked goes first (until the page is reloaded).
+const lastGood = { text: null, tts: null };
+function modelList(kind) {
+  const m = state.models || {};
+  const base = kind === 'text'
+    ? (m.textList || [m.text, ...TEXT_MODELS])
+    : (m.ttsList || [m.tts, ...TTS_MODELS]);
+  return [...new Set([lastGood[kind], ...base].filter(Boolean))];
+}
+
+// Busy / quota / server errors: worth trying another model or waiting a moment.
+function isTransient(e) {
+  return [429, 500, 502, 503, 504].includes(e.status)
+    || e instanceof TypeError // network hiccup
+    || /high demand|overloaded|unavailable|try again/i.test(e.message || '');
+}
+function isUnusableModel(e) {
+  return e.status === 404 || (e.status === 400 && /not found|not supported|unsupported/i.test(e.message || ''));
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Try each model in turn; if all are busy, wait and go round once more.
+async function withFallback(kind, fn, onRetry) {
+  const list = modelList(kind);
+  let lastErr;
+  for (let round = 0; round < 2; round++) {
+    if (round > 0) { onRetry?.(); await sleep(2500); }
+    for (const model of list) {
+      try {
+        const out = await fn(model);
+        lastGood[kind] = model;
+        return out;
+      } catch (e) {
+        lastErr = e;
+        if (isUnusableModel(e)) continue;
+        if (!isTransient(e)) throw e;
+        console.warn(`${model} busy (${e.status}): trying next`, e.message);
+        onRetry?.();
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function thinkingConfigFor(model) {
@@ -97,28 +139,29 @@ function thinkingConfigFor(model) {
   return { thinkingLevel: 'low' };
 }
 
-// Text/JSON call with the chosen model; drops thinkingConfig if the model rejects it.
+// Text/JSON call; falls back across models when one is busy, drops thinkingConfig if a model rejects it.
 async function askJSON(parts, schema) {
-  const model = state.models.text;
-  const body = {
-    systemInstruction: { parts: [{ text: systemPrompt(state.settings) }] },
-    contents: [{ role: 'user', parts }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-      temperature: 0.7,
-      thinkingConfig: thinkingConfigFor(model),
-    },
-  };
-  let j;
-  try {
-    j = await callGemini(model, body);
-  } catch (e) {
-    if (e.status === 400 && /think/i.test(e.message)) {
-      delete body.generationConfig.thinkingConfig;
-      j = await callGemini(model, body);
-    } else throw e;
-  }
+  const j = await withFallback('text', async (model) => {
+    const body = {
+      systemInstruction: { parts: [{ text: systemPrompt(state.settings) }] },
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        temperature: 0.7,
+        thinkingConfig: thinkingConfigFor(model),
+      },
+    };
+    try {
+      return await callGemini(model, body);
+    } catch (e) {
+      if (e.status === 400 && /think/i.test(e.message)) {
+        delete body.generationConfig.thinkingConfig;
+        return await callGemini(model, body);
+      }
+      throw e;
+    }
+  }, () => state.busy && setBusy(true, 'השרת עמוס, מנסה שוב…'));
   const text = (j.candidates?.[0]?.content?.parts || [])
     .filter((p) => p.text && !p.thought).map((p) => p.text).join('');
   if (!text) throw new Error('התשובה מהמודל הגיעה ריקה');
@@ -179,7 +222,7 @@ async function ttsBuffer(arabic, slow) {
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICES[state.settings.voice] } } },
     },
   };
-  const j = await callGemini(state.models.tts, body);
+  const j = await withFallback('tts', (model) => callGemini(model, body));
   const part = (j.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData);
   if (!part) throw new Error('no audio');
   const rate = +(/rate=(\d+)/.exec(part.inlineData.mimeType)?.[1] || 24000);
@@ -323,9 +366,21 @@ async function openConversation() {
     addPartner(res);
   } catch (e) {
     handleError(e);
+    addRetry('לא הצלחתי לפתוח את השיחה.', openConversation);
   } finally {
     setBusy(false);
   }
+}
+
+// A small "try again" card in the chat, so a failed turn (and its recording) isn't lost.
+function addRetry(text, fn) {
+  const b = el('div', 'bubble retry');
+  b.append(el('div', 'label', text));
+  const btn = el('button', 'text-btn strong', '↻ נסה שוב');
+  btn.onclick = () => { if (state.busy || rec.active) return; b.remove(); fn(); };
+  b.append(btn);
+  $('#chat-log').append(b);
+  scrollChat();
 }
 
 async function sendLearnerAudio(wavBytes) {
@@ -340,6 +395,7 @@ async function sendLearnerAudio(wavBytes) {
     addPartner(res);
   } catch (e) {
     handleError(e);
+    addRetry('ההקלטה שלך לא נשלחה.', () => sendLearnerAudio(wavBytes));
   } finally {
     setBusy(false);
   }
@@ -442,6 +498,7 @@ function handleError(e) {
   let msg = e.message || String(e);
   if (e.status === 400 && /API key/i.test(msg)) msg = 'המפתח לא תקין. בדוק אותו בהגדרות.';
   else if (e.status === 429) msg = 'הגעת למכסה החינמית לרגע הזה. חכה דקה ונסה שוב.';
+  else if (isTransient(e)) msg = 'השרתים של גוגל עמוסים כרגע (ניסיתי כמה מודלים). נסה שוב בעוד רגע.';
   else if (e.status === 403) msg = 'אין הרשאה למפתח הזה. בדוק אותו בהגדרות.';
   else if (e.name === 'NotAllowedError') msg = 'צריך לאשר גישה למיקרופון (בסמל המנעול ליד הכתובת).';
   toast('שגיאה: ' + msg, 7000);
