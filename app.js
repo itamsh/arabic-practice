@@ -1,4 +1,4 @@
-const APP_VERSION = '0.1.3';
+const APP_VERSION = '0.1.4';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 // Preferred models, best first. When one is busy the next is tried automatically.
@@ -195,6 +195,7 @@ function stopPlayback() {
   currentBtn = null;
 }
 
+let lastRawAudio = null;
 function pcmToBuffer(b64, rate) {
   const bin = atob(b64);
   const n = bin.length >> 1;
@@ -204,6 +205,7 @@ function pcmToBuffer(b64, rate) {
     if (v >= 0x8000) v -= 0x10000;
     pcm[i] = v / 0x8000;
   }
+  lastRawAudio = { pcm, rate }; // kept for the diagnostic download in settings
   const len = speechEnd(pcm, rate);
   const c = audioCtx();
   const buf = c.createBuffer(1, Math.max(1, len), rate);
@@ -216,8 +218,10 @@ function pcmToBuffer(b64, rate) {
   return buf;
 }
 
-// The TTS audio often ends with ~0.5 s of static/noise burst. Walk back from the end in 20 ms
-// windows and drop windows that are silence or noise (very high zero-crossing rate), up to 1.2 s.
+// The TTS audio often ends with ~0.5 s of static/noise burst after the last word.
+// Find the last VOICED 20 ms window (loud + low zero-crossing rate = a vowel/voiced sound).
+// Right after it, a short unvoiced stretch (<= 220 ms) is a word-final consonant (sh, s, t) and is kept;
+// a longer one is the static burst and is cut. Anything after a silent gap is cut too.
 function speechEnd(pcm, rate) {
   const win = Math.round(rate * 0.02);
   const windows = Math.floor(pcm.length / win);
@@ -234,16 +238,17 @@ function speechEnd(pcm, rate) {
     zcr[w] = cross / win;
     if (rms[w] > peak) peak = rms[w];
   }
-  const maxTrim = Math.round(1.2 / 0.02);
-  let w = windows - 1;
-  while (w > windows - 1 - maxTrim && w > 0) {
-    const silent = rms[w] < peak * 0.04;
-    const noisy = zcr[w] > 0.3;
-    if (!silent && !noisy) break;
-    w--;
+  // zero-crossing threshold scaled to the sample rate (voiced speech stays well under ~2.5 kHz crossings)
+  const voicedZcr = 2500 / rate;
+  let last = -1;
+  for (let w = windows - 1; w >= 0; w--) {
+    if (rms[w] > peak * 0.08 && zcr[w] < voicedZcr) { last = w; break; }
   }
-  // keep ~60 ms after the last speech window so word endings aren't cut
-  return Math.min(pcm.length, (w + 1) * win + Math.round(rate * 0.06));
+  if (last < 0) return pcm.length;
+  let k = 0; // energetic unvoiced windows right after the last voiced one
+  while (last + 1 + k < windows && rms[last + 1 + k] > peak * 0.03) k++;
+  const keep = k * 0.02 <= 0.22 ? k : 2;
+  return Math.min(pcm.length, (last + 1 + keep) * win + Math.round(rate * 0.05));
 }
 
 async function ttsBuffer(arabic, slow) {
@@ -709,6 +714,14 @@ function init() {
   $('#finish-btn').onclick = finishConversation;
   $('#back-btn').onclick = () => { stopPlayback(); if (rec.active) stopRecording(); show('home'); };
   $('#summary-home').onclick = () => show('home');
+  $('#download-audio').onclick = () => {
+    if (!lastRawAudio) { toast('עוד לא הושמע משפט'); return; }
+    const blob = new Blob([toWav16k(lastRawAudio.pcm, lastRawAudio.rate)], { type: 'audio/wav' });
+    const a = el('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'last-partner-audio.wav';
+    a.click();
+  };
   speechSynthesis?.getVoices?.(); // warm up voice list
 
   if (!navigator.mediaDevices?.getUserMedia) {
